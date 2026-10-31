@@ -1,8 +1,6 @@
 name: Refresh NBA Opening Events
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '30 13 * * *' # Daily 13:30 UTC, after most previous-night games
 permissions:
   contents: write
 jobs:
@@ -14,9 +12,9 @@ jobs:
         with:
           python-version: '3.11'
           cache: pip
-          cache-dependency-path: requirements.txt
-      - run: pip install -r requirements.txt
-      - run: python scripts/prop_culture_opening_refresh.py
+          cache-dependency-path: prop_culture_opening_requirements.txt
+      - run: pip install -r prop_culture_opening_requirements.txt
+      - run: python prop_culture_opening_refresh.py
       - name: Commit updated CSV snapshots
         run: |
           git config user.name 'github-actions[bot]'
