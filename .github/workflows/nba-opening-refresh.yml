@@ -1,6 +1,8 @@
 name: Refresh NBA Opening Events
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '30 13 * * *' # Daily at 13:30 UTC
 permissions:
   contents: write
 jobs:
