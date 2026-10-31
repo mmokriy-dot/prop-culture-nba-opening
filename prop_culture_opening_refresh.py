@@ -18,7 +18,13 @@ records = []
 for game_id, group in raw.groupby('game_id', sort=False):
     first = group.iloc[0]
     away, home = str(first.get('away_team_abbrev','')), str(first.get('home_team_abbrev',''))
-    away_id, home_id = str(first.get('away_team_id','')), str(first.get('home_team_id',''))
+    away_id, home_id = int(first['away_team_id']), int(first['home_team_id'])
+    def team_for_id(value):
+        try:
+            n = int(float(value))
+        except (TypeError, ValueError):
+            return ''
+        return away if n == away_id else home if n == home_id else ''
     jump = group[group['type_text'].astype(str).str.contains('Jumpball', case=False, na=False)]
     jump = jump.iloc[0] if not jump.empty else None
     jumptext = str(jump['text']) if jump is not None else ''
@@ -28,25 +34,23 @@ for game_id, group in raw.groupby('game_id', sort=False):
     # The initial possession player may differ from either jumper.
     poss_team = ''
     if jump is not None and match:
-        # Team ID on a jump event can represent event attribution, not necessarily winner.
-        # Prefer explicit possession athlete ID match against an observed roster mapping.
-        athlete_rows = group[['team_id','athlete_name_1','athlete_name_2','athlete_name_3']].copy()
-        found=set()
-        for _, r in athlete_rows.iterrows():
-            tid=str(r['team_id'])
-            if tid not in (away_id,home_id):continue
-            for col in ('athlete_name_1','athlete_name_2','athlete_name_3'):
-                if str(r[col]).strip()==poss:found.add(away if tid==away_id else home)
-        if len(found)==1:poss_team=next(iter(found))
+        # The source jump-ball row's team_id identifies the gaining-possession team.
+        # Verify that the possession player is named on the same jump-ball record.
+        participants = [str(jump.get(col, '')).strip() for col in
+                        ('athlete_name_1', 'athlete_name_2', 'athlete_name_3')]
+        if poss in participants:
+            poss_team = team_for_id(jump.get('team_id'))
     shots = group[group['shooting_play'].astype(str).str.lower().isin(['true','1'])].copy()
     # shooting_play includes free throws in some feeds; use field-goal descriptions only.
     shots = shots[~shots['type_text'].astype(str).str.contains('free throw',case=False,na=False)]
     def get_shot(team=None):
-        ss=shots if team is None else shots[shots['team_id'].astype(str)==str(team)]
+        ss=shots if team is None else shots[shots['team_id'].apply(team_for_id)==team_for_id(team)]
         if ss.empty:return ('','','')
         s=ss.iloc[0]
-        return (str(s.get('athlete_name_1','') or ''), str(s.get('text','') or ''), away if str(s['team_id'])==away_id else home if str(s['team_id'])==home_id else '')
+        return (str(s.get('athlete_name_1','') or ''), str(s.get('text','') or ''), team_for_id(s['team_id']))
     fs, desc, ft = get_shot()
+    if not ft:
+        raise RuntimeError(f'First shot has no matching team in game {game_id}')
     away_fs, away_desc, _ = get_shot(away_id)
     home_fs, home_desc, _ = get_shot(home_id)
     records.append(dict(game_id=game_id,date=str(first.get('game_date',''))[:10],away=away,home=home,
@@ -58,7 +62,7 @@ for game_id, group in raw.groupby('game_id', sort=False):
 
 games=pd.DataFrame(records).sort_values(['date','game_id'])
 # Fail safely if the upstream source schema or mapping is unusable.
-if games.empty or games['game_first_shooter'].eq('').all():
+if games.empty or games['game_first_shooter'].eq('').any() or games['game_first_shot_team'].eq('').any() or games['opening_tip_verified'].sum() < len(games) * 0.9:
     raise RuntimeError('No usable opening-shot data; refusing to publish an empty snapshot')
 games.to_csv(OUT/'opening_game_results.csv',index=False)
 
